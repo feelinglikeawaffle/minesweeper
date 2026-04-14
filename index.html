@@ -232,6 +232,13 @@ function reveal(r,c) {
     cell.revealed = true;
     cell.el.classList.add("revealed");
 
+    // --- COIN GAIN PER TILE ---
+    let gain = 1 + passives.coinMagnet;
+    if (cell.adj > 0) gain += 1; // number bonus
+    coins += gain;
+    document.getElementById("coins").textContent = coins;
+
+    // Mine hit
     if (cell.mine) {
         if (passives.safeStep) {
             passives.safeStep = false;
@@ -244,21 +251,24 @@ function reveal(r,c) {
         return;
     }
 
+    // Show number
     if (cell.adj > 0) {
         cell.el.textContent = cell.adj;
-    } else {
-        // Flood fill
-        for (let dr=-1; dr<=1; dr++) {
-            for (let dc=-1; dc<=1; dc++) {
-                if (dr===0 && dc===0) continue;
-                let nr=r+dr, nc=c+dc;
-                if (nr>=0 && nr<ROWS && nc>=0 && nc<COLS)
-                    if (!board[nr][nc].mine)
-                        reveal(nr,nc);
-            }
+        return;
+    }
+
+    // Flood fill for zeros
+    for (let dr=-1; dr<=1; dr++) {
+        for (let dc=-1; dc<=1; dc++) {
+            if (dr===0 && dc===0) continue;
+            let nr=r+dr, nc=c+dc;
+            if (nr>=0 && nr<ROWS && nc>=0 && nc<COLS)
+                if (!board[nr][nc].mine)
+                    reveal(nr,nc);
         }
     }
 }
+
 
 function flagCell(r,c) {
     const cell = board[r][c];
