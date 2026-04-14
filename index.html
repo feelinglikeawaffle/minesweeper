@@ -1,342 +1,379 @@
 <!DOCTYPE html>
-<html lang="en">
+<html>
 <head>
-  <meta charset="UTF-8" />
-  <title>Single File Minesweeper</title>
-  <style>
+<meta charset="UTF-8">
+<title>Decksweeper</title>
+<style>
     body {
-      font-family: system-ui, sans-serif;
-      background: #222;
-      color: #eee;
-      display: flex;
-      flex-direction: column;
-      align-items: center;
-      justify-content: flex-start;
-      min-height: 100vh;
-      margin: 0;
-      padding-top: 20px;
+        background:#1b1b1b;
+        color:white;
+        font-family:Arial;
+        display:flex;
+        flex-direction:column;
+        align-items:center;
+        padding:20px;
     }
-
-    h1 {
-      margin: 0 0 10px;
-      font-size: 24px;
-    }
-
-    #controls {
-      margin-bottom: 10px;
-      display: flex;
-      gap: 10px;
-      align-items: center;
-    }
-
-    button {
-      padding: 6px 12px;
-      border-radius: 4px;
-      border: 1px solid #555;
-      background: #444;
-      color: #eee;
-      cursor: pointer;
-    }
-
-    button:hover {
-      background: #555;
-    }
-
-    #status {
-      min-width: 160px;
-    }
-
     #board {
-      display: grid;
-      grid-template-columns: repeat(9, 30px);
-      grid-template-rows: repeat(9, 30px);
-      gap: 2px;
-      background: #111;
-      padding: 4px;
-      border-radius: 4px;
-      box-shadow: 0 0 8px rgba(0,0,0,0.6);
-      user-select: none;
+        display:grid;
+        grid-template-columns:repeat(20,28px);
+        grid-gap:2px;
+        margin-top:10px;
     }
-
     .cell {
-      width: 30px;
-      height: 30px;
-      background: #333;
-      border-radius: 2px;
-      display: flex;
-      align-items: center;
-      justify-content: center;
-      font-size: 16px;
-      cursor: pointer;
-      color: #eee;
+        width:28px;
+        height:28px;
+        background:#333;
+        display:flex;
+        align-items:center;
+        justify-content:center;
+        cursor:pointer;
+        border-radius:3px;
+        font-size:14px;
     }
-
-    .cell.revealed {
-      background: #777;
-      cursor: default;
+    .revealed { background:#777; cursor:default; }
+    .mine.revealed { background:#b00; }
+    .flagged { background:#224; color:#ff0; }
+    #shop {
+        margin-top:20px;
+        padding:10px;
+        background:#222;
+        border:1px solid #555;
+        width:500px;
+        display:none;
     }
-
-    .cell.mine.revealed {
-      background: #b00;
-      color: #fff;
+    .card {
+        background:#333;
+        padding:10px;
+        margin:5px 0;
+        border-radius:4px;
+        cursor:pointer;
     }
-
-    .cell.flagged {
-      background: #335;
-      color: #ffeb3b;
-    }
-
-    .cell.revealed.num1 { color: #4fc3f7; }
-    .cell.revealed.num2 { color: #81c784; }
-    .cell.revealed.num3 { color: #ffb74d; }
-    .cell.revealed.num4 { color: #ba68c8; }
-    .cell.revealed.num5 { color: #ef5350; }
-    .cell.revealed.num6 { color: #26c6da; }
-    .cell.revealed.num7 { color: #bdbdbd; }
-    .cell.revealed.num8 { color: #f5f5f5; }
-  </style>
+    .rare { border-left:5px solid #4fc3f7; }
+    .epic { border-left:5px solid gold; }
+</style>
 </head>
 <body>
-  <h1>Minesweeper</h1>
-  <div id="controls">
-    <button id="resetBtn">New Game</button>
-    <div id="status">Left-click: reveal, Right-click: flag</div>
-  </div>
-  <div id="board"></div>
 
-  <script>
-    // Config
-    const ROWS = 9;
-    const COLS = 9;
-    const MINES = 10;
+<h1>Decksweeper</h1>
+<div>Coins: <span id="coins">0</span></div>
+<div id="board"></div>
 
-    const boardEl = document.getElementById('board');
-    const statusEl = document.getElementById('status');
-    const resetBtn = document.getElementById('resetBtn');
+<div id="shop">
+    <h2>Shop</h2>
+    <div id="shopCards"></div>
+    <button onclick="closeShop()">Skip</button>
+</div>
 
-    let board = [];
-    let gameOver = false;
-    let cellsRevealed = 0;
+<script>
+/* ============================================================
+   GAME CONFIG
+============================================================ */
+const ROWS = 20;
+const COLS = 20;
+const MINES = 50;
 
-    function createEmptyBoard() {
-      board = [];
-      for (let r = 0; r < ROWS; r++) {
-        const row = [];
-        for (let c = 0; c < COLS; c++) {
-          row.push({
-            row: r,
-            col: c,
-            mine: false,
-            revealed: false,
-            flagged: false,
-            adjacent: 0,
-            el: null
-          });
+let board = [];
+let coins = 0;
+let gameOver = false;
+let passives = {
+    coinMagnet: 0,
+    thickGloves: false,
+    safeStep: false
+};
+let activeCards = [];
+
+/* ============================================================
+   CARD DEFINITIONS
+============================================================ */
+const CARD_POOL = [
+    // Economy
+    {name:"Double Dig", rarity:"common", cost:8, effect:"doubleNext"},
+    {name:"Miner’s Touch", rarity:"common", cost:10, effect:"adjBonus"},
+    {name:"Treasure Map", rarity:"rare", cost:20, effect:"cornerBonus"},
+    {name:"Lucky Flag", rarity:"common", cost:12, effect:"flagBonus"},
+    {name:"Golden Chain", rarity:"rare", cost:25, effect:"zeroBonus"},
+
+    // Board Manipulation
+    {name:"Excavator", rarity:"rare", cost:20, effect:"excavator"},
+    {name:"Brushfire", rarity:"common", cost:10, effect:"brushfire"},
+    {name:"Probe", rarity:"common", cost:8, effect:"probe"},
+    {name:"Swap", rarity:"rare", cost:18, effect:"swap"},
+    {name:"Earthquake", rarity:"epic", cost:40, effect:"earthquake"},
+
+    // Mine Control
+    {name:"Defuser", rarity:"rare", cost:25, effect:"defuse"},
+    {name:"Scanner", rarity:"common", cost:10, effect:"scan"},
+    {name:"Magnet", rarity:"epic", cost:45, effect:"magnet"},
+    {name:"Ghost Flag", rarity:"common", cost:10, effect:"ghostFlag"},
+    {name:"Bomb Insurance", rarity:"rare", cost:20, effect:"insurance"},
+
+    // Power Cards
+    {name:"Time Stop", rarity:"epic", cost:50, effect:"timeStop"},
+    {name:"X-Ray Vision", rarity:"epic", cost:60, effect:"xray"},
+    {name:"Terraform", rarity:"epic", cost:55, effect:"terraform"},
+    {name:"Mine Vacuum", rarity:"epic", cost:60, effect:"vacuum"},
+    {name:"Golden Pickaxe", rarity:"epic", cost:70, effect:"goldenPick"},
+
+    // Passives
+    {name:"Coin Magnet", rarity:"rare", cost:25, effect:"passive_coin"},
+    {name:"Thick Gloves", rarity:"rare", cost:30, effect:"passive_gloves"},
+    {name:"Reinforced Boots", rarity:"rare", cost:30, effect:"passive_boots"}
+];
+
+/* ============================================================
+   BOARD GENERATION
+============================================================ */
+function newGame() {
+    board = [];
+    coins = 0;
+    gameOver = false;
+    document.getElementById("coins").textContent = coins;
+
+    // Build empty board
+    for (let r=0; r<ROWS; r++) {
+        let row = [];
+        for (let c=0; c<COLS; c++) {
+            row.push({
+                r, c,
+                mine:false,
+                revealed:false,
+                flagged:false,
+                adj:0,
+                el:null
+            });
         }
         board.push(row);
-      }
     }
 
-    function placeMines() {
-      let placed = 0;
-      while (placed < MINES) {
-        const r = Math.floor(Math.random() * ROWS);
-        const c = Math.floor(Math.random() * COLS);
+    // Place mines
+    let placed = 0;
+    while (placed < MINES) {
+        let r = Math.floor(Math.random()*ROWS);
+        let c = Math.floor(Math.random()*COLS);
         if (!board[r][c].mine) {
-          board[r][c].mine = true;
-          placed++;
+            board[r][c].mine = true;
+            placed++;
         }
-      }
     }
 
-    function inBounds(r, c) {
-      return r >= 0 && r < ROWS && c >= 0 && c < COLS;
-    }
-
-    function computeAdjacents() {
-      const dirs = [
-        [-1, -1], [-1, 0], [-1, 1],
-        [ 0, -1],          [ 0, 1],
-        [ 1, -1], [ 1, 0], [ 1, 1]
-      ];
-      for (let r = 0; r < ROWS; r++) {
-        for (let c = 0; c < COLS; c++) {
-          if (board[r][c].mine) {
-            board[r][c].adjacent = -1;
-            continue;
-          }
-          let count = 0;
-          for (const [dr, dc] of dirs) {
-            const nr = r + dr;
-            const nc = c + dc;
-            if (inBounds(nr, nc) && board[nr][nc].mine) count++;
-          }
-          board[r][c].adjacent = count;
+    // Compute adjacency
+    for (let r=0; r<ROWS; r++) {
+        for (let c=0; c<COLS; c++) {
+            if (board[r][c].mine) continue;
+            let count = 0;
+            for (let dr=-1; dr<=1; dr++) {
+                for (let dc=-1; dc<=1; dc++) {
+                    if (dr===0 && dc===0) continue;
+                    let nr=r+dr, nc=c+dc;
+                    if (nr>=0 && nr<ROWS && nc>=0 && nc<COLS && board[nr][nc].mine)
+                        count++;
+                }
+            }
+            board[r][c].adj = count;
         }
-      }
     }
 
-    function buildDOMBoard() {
-      boardEl.innerHTML = '';
-      boardEl.style.gridTemplateColumns = `repeat(${COLS}, 30px)`;
-      boardEl.style.gridTemplateRows = `repeat(${ROWS}, 30px)`;
+    drawBoard();
+}
 
-      for (let r = 0; r < ROWS; r++) {
-        for (let c = 0; c < COLS; c++) {
-          const cell = board[r][c];
-          const div = document.createElement('div');
-          div.className = 'cell';
-          div.dataset.row = r;
-          div.dataset.col = c;
+function drawBoard() {
+    const boardEl = document.getElementById("board");
+    boardEl.innerHTML = "";
 
-          div.addEventListener('click', onCellLeftClick);
-          div.addEventListener('contextmenu', onCellRightClick);
+    for (let r=0; r<ROWS; r++) {
+        for (let c=0; c<COLS; c++) {
+            const cell = board[r][c];
+            const div = document.createElement("div");
+            div.className = "cell";
+            div.dataset.r = r;
+            div.dataset.c = c;
 
-          cell.el = div;
-          boardEl.appendChild(div);
+            div.onclick = () => clickCell(r,c);
+            div.oncontextmenu = (e) => { e.preventDefault(); flagCell(r,c); };
+
+            cell.el = div;
+            boardEl.appendChild(div);
         }
-      }
+    }
+}
+
+/* ============================================================
+   GAMEPLAY
+============================================================ */
+function clickCell(r,c) {
+    if (gameOver) return;
+    const cell = board[r][c];
+    if (cell.revealed || cell.flagged) return;
+
+    // Active card: Probe
+    if (activeCards.includes("probe")) {
+        alert("This tile is " + (cell.mine ? "a MINE" : "SAFE"));
+        activeCards = activeCards.filter(x=>x!=="probe");
+        return;
     }
 
-    function onCellLeftClick(e) {
-      if (gameOver) return;
-      const r = parseInt(e.currentTarget.dataset.row, 10);
-      const c = parseInt(e.currentTarget.dataset.col, 10);
-      revealCell(r, c);
-      checkWin();
-    }
+    // Reveal
+    reveal(r,c);
 
-    function onCellRightClick(e) {
-      e.preventDefault();
-      if (gameOver) return;
-      const r = parseInt(e.currentTarget.dataset.row, 10);
-      const c = parseInt(e.currentTarget.dataset.col, 10);
-      toggleFlag(r, c);
-    }
+    // Earn coins
+    let gain = 1 + passives.coinMagnet;
+    if (cell.adj > 0) gain += 1;
+    coins += gain;
+    document.getElementById("coins").textContent = coins;
 
-    function toggleFlag(r, c) {
-      const cell = board[r][c];
-      if (cell.revealed) return;
-      cell.flagged = !cell.flagged;
-      renderCell(cell);
-    }
+    // After every turn → shop
+    openShop();
+}
 
-    function revealCell(r, c) {
-      const cell = board[r][c];
-      if (cell.revealed || cell.flagged) return;
+function reveal(r,c) {
+    const cell = board[r][c];
+    if (cell.revealed) return;
 
-      cell.revealed = true;
-      cellsRevealed++;
-      renderCell(cell);
+    cell.revealed = true;
+    cell.el.classList.add("revealed");
 
-      if (cell.mine) {
+    if (cell.mine) {
+        if (passives.safeStep) {
+            passives.safeStep = false;
+            alert("Reinforced Boots saved you");
+            return;
+        }
+        cell.el.classList.add("mine");
+        alert("BOOM");
         gameOver = true;
-        statusEl.textContent = 'Boom! You hit a mine. Game over.';
-        revealAllMines();
         return;
-      }
-
-      if (cell.adjacent === 0) {
-        floodReveal(r, c);
-      }
     }
 
-    function floodReveal(r, c) {
-      const dirs = [
-        [-1, -1], [-1, 0], [-1, 1],
-        [ 0, -1],          [ 0, 1],
-        [ 1, -1], [ 1, 0], [ 1, 1]
-      ];
-      const stack = [[r, c]];
-
-      while (stack.length) {
-        const [cr, cc] = stack.pop();
-        for (const [dr, dc] of dirs) {
-          const nr = cr + dr;
-          const nc = cc + dc;
-          if (!inBounds(nr, nc)) continue;
-          const neighbor = board[nr][nc];
-          if (neighbor.revealed || neighbor.flagged || neighbor.mine) continue;
-
-          neighbor.revealed = true;
-          cellsRevealed++;
-          renderCell(neighbor);
-
-          if (neighbor.adjacent === 0) {
-            stack.push([nr, nc]);
-          }
+    if (cell.adj > 0) {
+        cell.el.textContent = cell.adj;
+    } else {
+        // Flood fill
+        for (let dr=-1; dr<=1; dr++) {
+            for (let dc=-1; dc<=1; dc++) {
+                if (dr===0 && dc===0) continue;
+                let nr=r+dr, nc=c+dc;
+                if (nr>=0 && nr<ROWS && nc>=0 && nc<COLS)
+                    if (!board[nr][nc].mine)
+                        reveal(nr,nc);
+            }
         }
-      }
+    }
+}
+
+function flagCell(r,c) {
+    const cell = board[r][c];
+    if (cell.revealed) return;
+    cell.flagged = !cell.flagged;
+    cell.el.classList.toggle("flagged");
+}
+
+/* ============================================================
+   SHOP
+============================================================ */
+function openShop() {
+    const shop = document.getElementById("shop");
+    const shopCards = document.getElementById("shopCards");
+    shopCards.innerHTML = "";
+
+    let options = [];
+    for (let i=0; i<3; i++) {
+        options.push( CARD_POOL[Math.floor(Math.random()*CARD_POOL.length)] );
     }
 
-    function revealAllMines() {
-      for (let r = 0; r < ROWS; r++) {
-        for (let c = 0; c < COLS; c++) {
-          const cell = board[r][c];
-          if (cell.mine) {
-            cell.revealed = true;
-            renderCell(cell);
-          }
-        }
-      }
-    }
+    options.forEach(card => {
+        const div = document.createElement("div");
+        div.className = "card " + (card.rarity==="rare"?"rare": card.rarity==="epic"?"epic":"");
+        div.innerHTML = `<b>${card.name}</b> (${card.cost}c)<br>${card.effect}`;
+        div.onclick = () => buyCard(card);
+        shopCards.appendChild(div);
+    });
 
-    function renderCell(cell) {
-      const el = cell.el;
-      el.className = 'cell';
+    shop.style.display = "block";
+}
 
-      if (cell.flagged && !cell.revealed) {
-        el.classList.add('flagged');
-        el.textContent = '⚑';
+function closeShop() {
+    document.getElementById("shop").style.display = "none";
+}
+
+function buyCard(card) {
+    if (coins < card.cost) {
+        alert("Not enough coins");
         return;
-      }
-
-      if (!cell.revealed) {
-        el.textContent = '';
-        return;
-      }
-
-      el.classList.add('revealed');
-
-      if (cell.mine) {
-        el.classList.add('mine');
-        el.textContent = '💣';
-        return;
-      }
-
-      if (cell.adjacent > 0) {
-        el.textContent = cell.adjacent;
-        el.classList.add('num' + cell.adjacent);
-      } else {
-        el.textContent = '';
-      }
     }
+    coins -= card.cost;
+    document.getElementById("coins").textContent = coins;
 
-    function checkWin() {
-      const totalCells = ROWS * COLS;
-      const safeCells = totalCells - MINES;
-      if (cellsRevealed >= safeCells && !gameOver) {
-        gameOver = true;
-        statusEl.textContent = 'You cleared the board! You win!';
-        revealAllMines();
-      }
+    applyCard(card);
+    closeShop();
+}
+
+/* ============================================================
+   CARD EFFECTS
+============================================================ */
+function applyCard(card) {
+    switch(card.effect) {
+        case "passive_coin": passives.coinMagnet++; break;
+        case "passive_gloves": passives.thickGloves = true; break;
+        case "passive_boots": passives.safeStep = true; break;
+
+        case "probe": activeCards.push("probe"); break;
+
+        case "defuse":
+            removeRandomMine();
+            break;
+
+        case "terraform":
+            terraform();
+            break;
+
+        case "earthquake":
+            shuffleBoard();
+            break;
+
+        default:
+            alert("Card acquired: " + card.name);
     }
+}
 
-    function newGame() {
-      gameOver = false;
-      cellsRevealed = 0;
-      statusEl.textContent = 'Left-click: reveal, Right-click: flag';
+function removeRandomMine() {
+    let mines = [];
+    for (let r=0; r<ROWS; r++)
+        for (let c=0; c<COLS; c++)
+            if (board[r][c].mine) mines.push(board[r][c]);
 
-      createEmptyBoard();
-      placeMines();
-      computeAdjacents();
-      buildDOMBoard();
+    if (mines.length === 0) return;
+
+    let m = mines[Math.floor(Math.random()*mines.length)];
+    m.mine = false;
+    alert("A mine was removed");
+}
+
+function terraform() {
+    for (let i=0; i<10; i++) {
+        let r = Math.floor(Math.random()*ROWS);
+        let c = Math.floor(Math.random()*COLS);
+        board[r][c].mine = false;
     }
+    alert("10 tiles terraformed");
+}
 
-    resetBtn.addEventListener('click', newGame);
+function shuffleBoard() {
+    let tiles = [];
+    for (let r=0; r<ROWS; r++)
+        for (let c=0; c<COLS; c++)
+            tiles.push(board[r][c].mine);
 
-    // Start
-    newGame();
-  </script>
+    tiles.sort(()=>Math.random()-0.5);
+
+    let i=0;
+    for (let r=0; r<ROWS; r++)
+        for (let c=0; c<COLS; c++)
+            board[r][c].mine = tiles[i++];
+
+    alert("Earthquake shuffled the mines");
+}
+
+newGame();
+</script>
 </body>
 </html>
