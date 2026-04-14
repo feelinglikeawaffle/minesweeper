@@ -36,10 +36,12 @@
     cursor:pointer;
     border-radius:3px;
     font-size:14px;
+    transition:box-shadow 0.2s;
   }
   .revealed { background:#777; cursor:default; }
   .mine.revealed { background:#b00; }
   .flagged { background:#224; color:#ff0; }
+
   #activeBar {
     margin-top:15px;
     padding:8px;
@@ -58,6 +60,7 @@
     font-size:12px;
   }
   #activeCards button:hover { background:#555; }
+
   #shop {
     margin-top:20px;
     padding:10px;
@@ -78,6 +81,28 @@
   .rare { border-left:4px solid #4fc3f7; }
   .epic { border-left:4px solid gold; }
   .fools { border-left:4px solid #ff4081; }
+
+  /* X-ray glow */
+  .glowMine {
+    animation: glowMineAnim 1s ease-out;
+  }
+  @keyframes glowMineAnim {
+    0% { box-shadow: 0 0 0px rgba(255,0,0,0); }
+    50% { box-shadow: 0 0 12px rgba(255,0,0,0.8); }
+    100% { box-shadow: 0 0 0px rgba(255,0,0,0); }
+  }
+
+  /* Wrong flag shake */
+  .wrongFlag {
+    animation: wrongFlagAnim 0.5s;
+  }
+  @keyframes wrongFlagAnim {
+    0% { transform: translateX(0px); }
+    25% { transform: translateX(-3px); }
+    50% { transform: translateX(3px); }
+    75% { transform: translateX(-3px); }
+    100% { transform: translateX(0px); }
+  }
 </style>
 </head>
 <body>
@@ -125,10 +150,10 @@ let probeMode = false;
 let excavatorMode = false;
 let vacuumMode = false;
 let scanMode = false;
+let xrayTurns = 0;
 
 /* ============================================================
    CARD POOL
-   fools rarity = good/bad swingy cards
 ============================================================ */
 const CARD_POOL = [
   // Economy
@@ -171,7 +196,7 @@ const CARD_POOL = [
   {name:"Time Stop", rarity:"epic", cost:50, effect:"timeStop",
    desc:"Reveal 5 tiles for free without triggering mines."},
   {name:"X-Ray Vision", rarity:"epic", cost:60, effect:"xray",
-   desc:"Mines glow faintly for your next 3 turns (visual hint)."},
+   desc:"Nearby mines may glow softly for the next 3 turns."},
   {name:"Terraform", rarity:"fools", cost:55, effect:"terraform",
    desc:"Turn 10 random tiles safe. Could move danger closer."},
   {name:"Mine Vacuum", rarity:"fools", cost:60, effect:"vacuum",
@@ -185,7 +210,11 @@ const CARD_POOL = [
   {name:"Thick Gloves", rarity:"rare", cost:30, effect:"passive_gloves",
    desc:"First misclick each game is ignored."},
   {name:"Reinforced Boots", rarity:"rare", cost:30, effect:"passive_boots",
-   desc:"You can step on one mine without dying."}
+   desc:"You can step on one mine without dying."},
+
+  // Utility
+  {name:"Flag Checker", rarity:"rare", cost:18, effect:"flagCheck",
+   desc:"Checks all flags. Correct flags glow green, wrong flags shake red."}
 ];
 
 /* ============================================================
@@ -203,6 +232,7 @@ function newGame() {
   excavatorMode = false;
   vacuumMode = false;
   scanMode = false;
+  xrayTurns = 0;
 
   document.getElementById("coins").textContent = coins;
   document.getElementById("activeCards").innerHTML = "";
@@ -308,7 +338,6 @@ function clickCell(r,c) {
 
   // Vacuum
   if (vacuumMode) {
-    // remove mines in a horizontal line
     for (let cc=0; cc<COLS; cc++) {
       board[r][cc].mine = false;
     }
@@ -316,6 +345,7 @@ function clickCell(r,c) {
     updateAfterMineChange();
     alert("Mine Vacuum cleared a row.");
     vacuumMode = false;
+    if (!gameOver) openShop();
     return;
   }
 
@@ -332,6 +362,12 @@ function clickCell(r,c) {
     excavatorMode = false;
   } else {
     reveal(r,c);
+  }
+
+  // X-ray glow after click
+  if (!gameOver && xrayTurns > 0) {
+    xrayGlow(r,c);
+    xrayTurns--;
   }
 
   if (!gameOver) openShop();
@@ -405,6 +441,43 @@ function revealAllMines() {
 }
 
 /* ============================================================
+   X-RAY VISION
+============================================================ */
+function xrayGlow(r,c) {
+  for (let dr=-2; dr<=2; dr++) {
+    for (let dc=-2; dc<=2; dc++) {
+      let nr = r + dr, nc = c + dc;
+      if (nr<0 || nr>=ROWS || nc<0 || nc>=COLS) continue;
+      let cell = board[nr][nc];
+      if (cell.mine && Math.random() < 0.35) {
+        cell.el.classList.add("glowMine");
+        setTimeout(() => cell.el.classList.remove("glowMine"), 1000);
+      }
+    }
+  }
+}
+
+/* ============================================================
+   FLAG CHECKER
+============================================================ */
+function flagCheck() {
+  for (let r=0; r<ROWS; r++) {
+    for (let c=0; c<COLS; c++) {
+      const cell = board[r][c];
+      if (!cell.flagged) continue;
+
+      if (cell.mine) {
+        cell.el.style.boxShadow = "0 0 10px 3px lime";
+        setTimeout(() => cell.el.style.boxShadow = "", 800);
+      } else {
+        cell.el.classList.add("wrongFlag");
+        setTimeout(() => cell.el.classList.remove("wrongFlag"), 500);
+      }
+    }
+  }
+}
+
+/* ============================================================
    SHOP
 ============================================================ */
 function openShop() {
@@ -470,15 +543,10 @@ function applyCard(card) {
 
     // modes / actives
     case "probe":
-      addActiveCard(card);
-      break;
     case "excavator":
-      addActiveCard(card);
-      break;
     case "scan":
-      addActiveCard(card);
-      break;
     case "vacuum":
+    case "flagCheck":
       addActiveCard(card);
       break;
 
@@ -489,6 +557,12 @@ function applyCard(card) {
     case "magnet":
     case "swap":
       addActiveCard(card);
+      break;
+
+    // xray
+    case "xray":
+      xrayTurns = 3;
+      alert("X-Ray Vision: nearby mines may glow for the next 3 turns.");
       break;
 
     default:
@@ -523,6 +597,9 @@ function useActiveCard(effect, btn) {
       vacuumMode = true;
       alert("Mine Vacuum: click a tile to clear its row.");
       break;
+    case "flagCheck":
+      flagCheck();
+      break;
 
     case "defuse":
       removeRandomMine();
@@ -549,7 +626,6 @@ function useActiveCard(effect, btn) {
 
 /* ============================================================
    MINE-CHANGING EFFECTS
-   All call updateAfterMineChange()
 ============================================================ */
 function removeRandomMine() {
   let mines = [];
@@ -604,7 +680,6 @@ function earthquake() {
 }
 
 function magnet() {
-  // simple pull toward center
   const centerR = Math.floor(ROWS/2);
   const centerC = Math.floor(COLS/2);
   let newMines = Array.from({length:ROWS}, () => Array(COLS).fill(false));
@@ -668,12 +743,10 @@ function updateAfterMineChange() {
 
       if (cell.revealed) {
         if (cell.mine) {
-          // revealed tile turned into a mine → auto-flag
           cell.flagged = true;
-          cell.el.classList.add("flagged");
+          cell.el.classList.add("flagged","mine");
           cell.el.textContent = "";
         } else {
-          // revealed safe tile → show updated number
           cell.flagged = false;
           cell.el.classList.remove("flagged","mine");
           cell.el.textContent = cell.adj > 0 ? cell.adj : "";
