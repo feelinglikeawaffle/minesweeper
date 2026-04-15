@@ -795,25 +795,45 @@ function swapTwoTiles() {
 }
 
 function updateAfterMineChange() {
-  for (let r=0; r<ROWS; r++) {
-    for (let c=0; c<COLS; c++) {
+  for (let r = 0; r < ROWS; r++) {
+    for (let c = 0; c < COLS; c++) {
       const cell = board[r][c];
       if (!cell.el) continue;
 
+      // CASE 1: Tile was revealed BEFORE shuffle
       if (cell.revealed) {
+
         if (cell.mine) {
+          // A revealed tile now contains a mine → auto-blue-flag
           cell.flagged = true;
-          cell.el.classList.add("flagged","mine");
-          cell.el.textContent = "";
+          cell.el.classList.add("flagged");
+          cell.el.classList.add("mine");
+          cell.el.style.background = "#224";   // blue-ish
+          cell.el.textContent = "";            // no number
         } else {
+          // A revealed tile is safe → update number
           cell.flagged = false;
           cell.el.classList.remove("flagged","mine");
+          cell.el.style.background = "#777";   // revealed color
           cell.el.textContent = cell.adj > 0 ? cell.adj : "";
         }
+      }
+
+      // CASE 2: Tile was flagged BEFORE shuffle
+      else if (cell.flagged && !cell.revealed) {
+
+        if (!cell.mine) {
+          // Flag was wrong AFTER shuffle → remove it
+          cell.flagged = false;
+          cell.el.classList.remove("flagged");
+          cell.el.textContent = "";
+        }
+        // If it IS a mine now, keep the flag (correct)
       }
     }
   }
 }
+
 
 newGame();
 </script>
