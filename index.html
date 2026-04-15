@@ -60,6 +60,11 @@
     font-size:12px;
   }
   #activeCards button:hover { background:#555; }
+  .activeCardButton {
+    background:#3b6aff !important;
+    border:1px solid #6a8dff !important;
+    color:white !important;
+  }
 
   #shop {
     margin-top:20px;
@@ -82,9 +87,8 @@
   .epic { border-left:4px solid gold; }
   .fools { border-left:4px solid #ff4081; }
 
-  /* X-ray glow */
   .glowMine {
-    animation: glowMineAnim 1s ease-out;
+    animation: glowMineAnim 1.5s ease-out;
   }
   @keyframes glowMineAnim {
     0% { box-shadow: 0 0 0px rgba(255,0,0,0); }
@@ -92,7 +96,6 @@
     100% { box-shadow: 0 0 0px rgba(255,0,0,0); }
   }
 
-  /* Wrong flag shake */
   .wrongFlag {
     animation: wrongFlagAnim 0.5s;
   }
@@ -127,9 +130,6 @@
 </div>
 
 <script>
-/* ============================================================
-   CONFIG
-============================================================ */
 const ROWS = 20;
 const COLS = 20;
 const MINES = 50;
@@ -141,10 +141,18 @@ let gameOver = false;
 let passives = {
   coinMagnet: 0,
   thickGloves: false,
-  safeStep: false
+  safeStep: false,
+  extraLife: false,
+  insurance: false,
+  doubleNext: false,
+  adjBonus: false,
+  cornerBonus: false,
+  flagBonus: false,
+  zeroBonus: false,
+  goldenPick: false
 };
 
-let activeCards = []; // {effect, name}
+let activeCards = [];
 
 let probeMode = false;
 let excavatorMode = false;
@@ -152,11 +160,7 @@ let vacuumMode = false;
 let scanMode = false;
 let xrayTurns = 0;
 
-/* ============================================================
-   CARD POOL
-============================================================ */
 const CARD_POOL = [
-  // Economy
   {name:"Double Dig", rarity:"common", cost:8, effect:"doubleNext",
    desc:"Next revealed tile gives double coins."},
   {name:"Miner’s Touch", rarity:"common", cost:10, effect:"adjBonus",
@@ -168,7 +172,6 @@ const CARD_POOL = [
   {name:"Golden Chain", rarity:"rare", cost:25, effect:"zeroBonus",
    desc:"Next zero-region clear gives +10 extra coins."},
 
-  // Board Manipulation
   {name:"Excavator", rarity:"rare", cost:20, effect:"excavator",
    desc:"Next click reveals a 3×3 area around it."},
   {name:"Brushfire", rarity:"common", cost:10, effect:"brushfire",
@@ -180,7 +183,6 @@ const CARD_POOL = [
   {name:"Earthquake", rarity:"fools", cost:40, effect:"earthquake",
    desc:"Shuffle all mines, recalc numbers, and fix revealed tiles/flags."},
 
-  // Mine Control
   {name:"Defuser", rarity:"rare", cost:25, effect:"defuse",
    desc:"Remove one random mine from the board."},
   {name:"Scanner", rarity:"common", cost:10, effect:"scan",
@@ -192,7 +194,6 @@ const CARD_POOL = [
   {name:"Bomb Insurance", rarity:"rare", cost:20, effect:"insurance",
    desc:"Survive the next explosion."},
 
-  // Power Cards
   {name:"Time Stop", rarity:"epic", cost:50, effect:"timeStop",
    desc:"Reveal 5 tiles for free without triggering mines."},
   {name:"X-Ray Vision", rarity:"epic", cost:60, effect:"xray",
@@ -204,7 +205,6 @@ const CARD_POOL = [
   {name:"Golden Pickaxe", rarity:"epic", cost:70, effect:"goldenPick",
    desc:"All reveals this turn give 5× coins."},
 
-  // Passives
   {name:"Coin Magnet", rarity:"rare", cost:25, effect:"passive_coin",
    desc:"Permanently gain +1 coin per revealed tile."},
   {name:"Thick Gloves", rarity:"rare", cost:30, effect:"passive_gloves",
@@ -212,21 +212,30 @@ const CARD_POOL = [
   {name:"Reinforced Boots", rarity:"rare", cost:30, effect:"passive_boots",
    desc:"You can step on one mine without dying."},
 
-  // Utility
   {name:"Flag Checker", rarity:"rare", cost:18, effect:"flagCheck",
-   desc:"Checks all flags. Correct flags glow green, wrong flags shake red."}
+   desc:"Checks all flags. Correct flags glow green, wrong flags shake red."},
+
+  {name:"1UP", rarity:"fools", cost:35, effect:"oneUp",
+   desc:"Gain +1 life. When used, 25% more mines spawn and board recalculates."}
 ];
 
-/* ============================================================
-   BOARD SETUP
-============================================================ */
 function newGame() {
   board = [];
   coins = 0;
   gameOver = false;
-  passives.coinMagnet = 0;
-  passives.thickGloves = false;
-  passives.safeStep = false;
+  passives = {
+    coinMagnet: 0,
+    thickGloves: false,
+    safeStep: false,
+    extraLife: false,
+    insurance: false,
+    doubleNext: false,
+    adjBonus: false,
+    cornerBonus: false,
+    flagBonus: false,
+    zeroBonus: false,
+    goldenPick: false
+  };
   activeCards = [];
   probeMode = false;
   excavatorMode = false;
@@ -306,22 +315,17 @@ function drawBoard() {
   }
 }
 
-/* ============================================================
-   GAMEPLAY
-============================================================ */
 function clickCell(r,c) {
   if (gameOver) return;
   const cell = board[r][c];
   if (cell.revealed || cell.flagged) return;
 
-  // Probe
   if (probeMode) {
     alert(cell.mine ? "This is a MINE" : "This is SAFE");
     probeMode = false;
     return;
   }
 
-  // Scanner
   if (scanMode) {
     let count = 0;
     for (let dr=-2; dr<=2; dr++) {
@@ -336,7 +340,6 @@ function clickCell(r,c) {
     return;
   }
 
-  // Vacuum
   if (vacuumMode) {
     for (let cc=0; cc<COLS; cc++) {
       board[r][cc].mine = false;
@@ -349,7 +352,6 @@ function clickCell(r,c) {
     return;
   }
 
-  // Excavator
   if (excavatorMode) {
     for (let dr=-1; dr<=1; dr++) {
       for (let dc=-1; dc<=1; dc++) {
@@ -364,7 +366,6 @@ function clickCell(r,c) {
     reveal(r,c);
   }
 
-  // X-ray glow after click
   if (!gameOver && xrayTurns > 0) {
     xrayGlow(r,c);
     xrayTurns--;
@@ -380,20 +381,51 @@ function reveal(r,c) {
   cell.revealed = true;
   cell.el.classList.add("revealed");
 
-  // coins per tile
   let gain = 1 + passives.coinMagnet;
   if (cell.adj > 0) gain += 1;
+  if (passives.adjBonus) {
+    gain += cell.adj;
+    passives.adjBonus = false;
+  }
+  if (passives.doubleNext) {
+    gain *= 2;
+    passives.doubleNext = false;
+  }
+  if (passives.goldenPick) {
+    gain *= 5;
+  }
   coins += gain;
   document.getElementById("coins").textContent = coins;
 
-  // mine?
   if (cell.mine) {
+    if (passives.extraLife) {
+      passives.extraLife = false;
+      alert("1UP saved you! But more mines have spawned...");
+      let extra = Math.floor(MINES * 0.25);
+      for (let i=0; i<extra; i++) {
+        let rr = Math.floor(Math.random()*ROWS);
+        let cc = Math.floor(Math.random()*COLS);
+        board[rr][cc].mine = true;
+      }
+      computeAdjacents();
+      updateAfterMineChange();
+      return;
+    }
+
     if (passives.safeStep) {
       passives.safeStep = false;
       cell.el.classList.add("mine");
       alert("Reinforced Boots saved you from a mine!");
       return;
     }
+
+    if (passives.insurance) {
+      passives.insurance = false;
+      cell.el.classList.add("mine");
+      alert("Bomb Insurance saved you from dying.");
+      return;
+    }
+
     cell.el.classList.add("mine");
     alert("BOOM! You hit a mine.");
     gameOver = true;
@@ -401,13 +433,14 @@ function reveal(r,c) {
     return;
   }
 
-  // number
   if (cell.adj > 0) {
     cell.el.textContent = cell.adj;
     return;
   }
 
-  // zero flood-fill
+  let zeroTriggered = false;
+  if (cell.adj === 0) zeroTriggered = true;
+
   for (let dr=-1; dr<=1; dr++) {
     for (let dc=-1; dc<=1; dc++) {
       if (dr===0 && dc===0) continue;
@@ -417,14 +450,27 @@ function reveal(r,c) {
       }
     }
   }
+
+  if (zeroTriggered && passives.zeroBonus) {
+    coins += 10;
+    document.getElementById("coins").textContent = coins;
+    passives.zeroBonus = false;
+  }
 }
 
 function flagCell(r,c) {
   if (gameOver) return;
   const cell = board[r][c];
   if (cell.revealed) return;
+  const wasFlagged = cell.flagged;
   cell.flagged = !cell.flagged;
   cell.el.classList.toggle("flagged");
+
+  if (!wasFlagged && cell.flagged && passives.flagBonus && cell.mine) {
+    coins += 5;
+    document.getElementById("coins").textContent = coins;
+    passives.flagBonus = false;
+  }
 }
 
 function revealAllMines() {
@@ -440,26 +486,20 @@ function revealAllMines() {
   }
 }
 
-/* ============================================================
-   X-RAY VISION
-============================================================ */
 function xrayGlow(r,c) {
   for (let dr=-2; dr<=2; dr++) {
     for (let dc=-2; dc<=2; dc++) {
       let nr = r + dr, nc = c + dc;
       if (nr<0 || nr>=ROWS || nc<0 || nc>=COLS) continue;
       let cell = board[nr][nc];
-      if (cell.mine && Math.random() < 0.35) {
+      if (cell.mine && Math.random() < 0.7) {
         cell.el.classList.add("glowMine");
-        setTimeout(() => cell.el.classList.remove("glowMine"), 1000);
+        setTimeout(() => cell.el.classList.remove("glowMine"), 1500);
       }
     }
   }
 }
 
-/* ============================================================
-   FLAG CHECKER
-============================================================ */
 function flagCheck() {
   for (let r=0; r<ROWS; r++) {
     for (let c=0; c<COLS; c++) {
@@ -477,9 +517,6 @@ function flagCheck() {
   }
 }
 
-/* ============================================================
-   SHOP
-============================================================ */
 function openShop() {
   const shop = document.getElementById("shop");
   const shopCards = document.getElementById("shopCards");
@@ -522,12 +559,8 @@ function buyCard(card) {
   closeShop();
 }
 
-/* ============================================================
-   CARD EFFECTS
-============================================================ */
 function applyCard(card) {
   switch(card.effect) {
-    // passives
     case "passive_coin":
       passives.coinMagnet++;
       alert("Coin Magnet: +" + passives.coinMagnet + " coin per tile.");
@@ -541,7 +574,40 @@ function applyCard(card) {
       alert("Reinforced Boots: one free mine step.");
       break;
 
-    // modes / actives
+    case "doubleNext":
+      passives.doubleNext = true;
+      alert("Double Dig: next reveal gives double coins.");
+      break;
+    case "adjBonus":
+      passives.adjBonus = true;
+      alert("Miner’s Touch: next reveal gains +1 coin per adjacent number.");
+      break;
+    case "cornerBonus":
+      passives.cornerBonus = true;
+      alert("Treasure Map: next corner reveal gives +10 coins.");
+      break;
+    case "flagBonus":
+      passives.flagBonus = true;
+      alert("Lucky Flag: next correct flag gives +5 coins.");
+      break;
+    case "zeroBonus":
+      passives.zeroBonus = true;
+      alert("Golden Chain: next zero-region gives +10 coins.");
+      break;
+    case "insurance":
+      passives.insurance = true;
+      alert("Bomb Insurance: survive the next explosion.");
+      break;
+    case "goldenPick":
+      passives.goldenPick = true;
+      alert("Golden Pickaxe: all reveals this turn give ×5 coins.");
+      break;
+
+    case "oneUp":
+      passives.extraLife = true;
+      alert("1UP acquired: you have an extra life!");
+      break;
+
     case "probe":
     case "excavator":
     case "scan":
@@ -550,7 +616,6 @@ function applyCard(card) {
       addActiveCard(card);
       break;
 
-    // mine-changing cards
     case "defuse":
     case "terraform":
     case "earthquake":
@@ -559,7 +624,6 @@ function applyCard(card) {
       addActiveCard(card);
       break;
 
-    // xray
     case "xray":
       xrayTurns = 3;
       alert("X-Ray Vision: nearby mines may glow for the next 3 turns.");
@@ -575,6 +639,7 @@ function addActiveCard(card) {
   activeCards.push({effect:card.effect, name:card.name});
   const btn = document.createElement("button");
   btn.textContent = card.name;
+  btn.classList.add("activeCardButton");
   btn.onclick = () => useActiveCard(card.effect, btn);
   document.getElementById("activeCards").appendChild(btn);
 }
@@ -624,9 +689,6 @@ function useActiveCard(effect, btn) {
   activeCards = activeCards.filter(c => c.effect !== effect);
 }
 
-/* ============================================================
-   MINE-CHANGING EFFECTS
-============================================================ */
 function removeRandomMine() {
   let mines = [];
   for (let r=0; r<ROWS; r++)
@@ -732,9 +794,6 @@ function swapTwoTiles() {
   alert("Swap exchanged a safe tile with a mine.");
 }
 
-/* ============================================================
-   AFTER MINE CHANGE: recalc numbers + auto-flag
-============================================================ */
 function updateAfterMineChange() {
   for (let r=0; r<ROWS; r++) {
     for (let c=0; c<COLS; c++) {
@@ -756,9 +815,6 @@ function updateAfterMineChange() {
   }
 }
 
-/* ============================================================
-   START
-============================================================ */
 newGame();
 </script>
 </body>
