@@ -2,7 +2,7 @@
 <html>
 <head>
 <meta charset="UTF-8">
-<title>Decksweeper A.1.93</title>
+<title>Decksweeper B.2.2</title>
 <style>
   body {
     background:#1b1b1b;
@@ -22,7 +22,6 @@
   }
   #board {
     display:grid;
-    grid-template-columns:repeat(20,28px);
     grid-gap:2px;
     margin-top:10px;
   }
@@ -42,7 +41,6 @@
   .mine.revealed { background:#b00; }
   .flagged { background:#224; color:#ff0; }
 
-  /* claimed states after mine shuffles */
   .claimedMine {
     background:#224 !important;
     color:#ffeb3b !important;
@@ -99,7 +97,6 @@
   .epic { border-left:4px solid gold; }
   .fools { border-left:4px solid #ff4081; }
 
-  /* X-ray glow */
   .glowMine {
     animation: glowMineAnim 1.5s ease-out;
   }
@@ -109,7 +106,6 @@
     100% { box-shadow:0 0 0px rgba(255,0,0,0); }
   }
 
-  /* wrong flag shake */
   .wrongFlag {
     animation: wrongFlagAnim 0.5s;
   }
@@ -124,10 +120,10 @@
 </head>
 <body>
 
-<h1>Decksweeper A.1.93</h1>
+<h1>Decksweeper B.2.2</h1>
 <div id="topBar">
   <div>Coins: <span id="coins">0</span></div>
-  <button onclick="newGame()">New Game</button>
+  <button onclick="newGame(true)">New Game</button>
 </div>
 
 <div id="board"></div>
@@ -144,14 +140,15 @@
 </div>
 
 <script>
-const ROWS = 20;
-const COLS = 20;
+let ROWS = 20;
+let COLS = 20;
 const MINES_BASE = 50;
 
 let board = [];
 let coins = 0;
 let gameOver = false;
-let totalMines = MINES_BASE;
+let totalMines = 0;
+let cycle = 1;
 
 let passives = {
   coinMagnet: 0,
@@ -177,11 +174,10 @@ let probeMode = false;
 let excavatorMode = false;
 let vacuumMode = false;
 let scanMode = false;
-let magnet2Mode = null; // target tile for Mine Magnetism II
+let magnet2Mode = null;
 let xrayTurns = 0;
 
 const CARD_POOL = [
-  // Economy / logic
   {name:"Double Dig", rarity:"common", type:"economy", cost:8, effect:"doubleNext",
    desc:"Next revealed tile gives double coins."},
   {name:"Miner’s Touch", rarity:"common", type:"economy", cost:10, effect:"adjBonus",
@@ -193,7 +189,6 @@ const CARD_POOL = [
   {name:"Golden Chain", rarity:"rare", type:"economy", cost:25, effect:"zeroBonus",
    desc:"Next zero-region clear gives +10 extra coins."},
 
-  // Board manipulation / utility
   {name:"Excavator", rarity:"rare", type:"utility", cost:20, effect:"excavator",
    desc:"Next click reveals a 3×3 area around it."},
   {name:"Brushfire", rarity:"common", type:"utility", cost:10, effect:"brushfire",
@@ -207,7 +202,6 @@ const CARD_POOL = [
   {name:"Flag Amnesty", rarity:"rare", type:"utility", cost:22, effect:"flagAmnesty",
    desc:"Remove all flags. Gain 5 coins for each correct flag."},
 
-  // Mine control / power
   {name:"Defuser", rarity:"rare", type:"power", cost:25, effect:"defuse",
    desc:"Remove one random mine from the board."},
   {name:"Terraform", rarity:"fools", type:"chaos", cost:55, effect:"terraform",
@@ -225,7 +219,6 @@ const CARD_POOL = [
   {name:"Boomerang Bombs", rarity:"fools", type:"chaos", cost:35, effect:"boomerangBombs",
    desc:"All mines shift one tile in a random direction."},
 
-  // Power cards
   {name:"Time Stop", rarity:"epic", type:"power", cost:50, effect:"timeStop",
    desc:"Reveal 5 tiles for free without triggering mines."},
   {name:"X-Ray Vision", rarity:"epic", type:"power", cost:60, effect:"xray",
@@ -233,7 +226,6 @@ const CARD_POOL = [
   {name:"Golden Pickaxe", rarity:"epic", type:"economy", cost:70, effect:"goldenPick",
    desc:"All reveals this turn give 5× coins."},
 
-  // Passives
   {name:"Coin Magnet", rarity:"rare", type:"economy", cost:25, effect:"passive_coin",
    desc:"Permanently gain +1 coin per revealed tile."},
   {name:"Thick Gloves", rarity:"rare", type:"defense", cost:30, effect:"passive_gloves",
@@ -249,7 +241,6 @@ const CARD_POOL = [
   {name:"Entropy Surge", rarity:"fools", type:"chaos", cost:40, effect:"entropySurge",
    desc:"Each turn, 1 safe tile becomes a mine and 1 mine becomes safe."},
 
-  // High-risk fools / chaos
   {name:"Earthquake", rarity:"fools", type:"chaos", cost:40, effect:"earthquake",
    desc:"Shuffle all mines, recalc numbers, and fix revealed tiles/flags."},
   {name:"Fate Flip", rarity:"fools", type:"chaos", cost:45, effect:"fateFlip",
@@ -281,39 +272,28 @@ function getRandomCard() {
   return CARD_POOL[CARD_POOL.length - 1];
 }
 
-function newGame() {
+function newGame(resetSize=false) {
+  if (resetSize) {
+    ROWS = 20;
+    COLS = 20;
+    totalMines = 0;
+    cycle = 1;
+  }
+  if (totalMines === 0) totalMines = MINES_BASE;
+
   board = [];
-  coins = 0;
   gameOver = false;
-  totalMines = MINES_BASE;
-  passives = {
-    coinMagnet: 0,
-    thickGloves: false,
-    safeStep: false,
-    extraLife: false,
-    insurance: false,
-    doubleNext: false,
-    adjBonus: false,
-    cornerBonus: false,
-    flagBonus: false,
-    zeroBonus: false,
-    goldenPick: false,
-    mercyCull: false,
-    mineTax: false,
-    guardianAngel: false,
-    entropySurge: false
-  };
-  activeCards = [];
   probeMode = false;
   excavatorMode = false;
   vacuumMode = false;
   scanMode = false;
   magnet2Mode = null;
   xrayTurns = 0;
-
-  document.getElementById("coins").textContent = coins;
+  activeCards = [];
   document.getElementById("activeCards").innerHTML = "";
   document.getElementById("shop").style.display = "none";
+
+  document.getElementById("coins").textContent = coins;
 
   for (let r=0; r<ROWS; r++) {
     let row = [];
@@ -368,6 +348,7 @@ function computeAdjacents() {
 function drawBoard() {
   const boardEl = document.getElementById("board");
   boardEl.innerHTML = "";
+  boardEl.style.gridTemplateColumns = `repeat(${COLS}, 28px)`;
   for (let r=0; r<ROWS; r++) {
     for (let c=0; c<COLS; c++) {
       const cell = board[r][c];
@@ -421,7 +402,7 @@ function clickCell(r,c) {
   }
 
   if (magnet2Mode) {
-    applyMineMagnetism2(magnet2Mode.r, magnet2Mode.c);
+    applyMineMagnetism2(r,c);
     magnet2Mode = null;
     if (!gameOver) endTurn();
     return;
@@ -431,7 +412,7 @@ function clickCell(r,c) {
     for (let dr=-1; dr<=1; dr++) {
       for (let dc=-1; dc<=1; dc++) {
         let nr=r+dr, nc=c+dc;
-        if (nr>=0 && nr<COLS && nc>=0 && nc<COLS) {
+        if (nr>=0 && nr<ROWS && nc>=0 && nc<COLS) {
           reveal(nr,nc);
         }
       }
@@ -446,7 +427,10 @@ function clickCell(r,c) {
     xrayTurns--;
   }
 
-  if (!gameOver) endTurn();
+  if (!gameOver) {
+    checkWinAndPrestige();
+    endTurn();
+  }
 }
 
 function endTurn() {
@@ -570,7 +554,10 @@ function flagCell(r,c) {
     alert("Mercy Cull: wrong flag! Instant death.");
     gameOver = true;
     revealAllMines();
+    return;
   }
+
+  if (!gameOver) checkWinAndPrestige();
 }
 
 function revealAllMines() {
@@ -669,7 +656,6 @@ function buyCard(card) {
 
 function applyCard(card) {
   switch(card.effect) {
-    // passives
     case "passive_coin":
       passives.coinMagnet++;
       alert("Coin Magnet: +" + passives.coinMagnet + " coin per tile.");
@@ -730,7 +716,6 @@ function applyCard(card) {
       alert("Entropy Surge: each turn, 1 safe tile becomes a mine and 1 mine becomes safe.");
       break;
 
-    // modes / actives
     case "probe":
     case "excavator":
     case "scan":
@@ -818,7 +803,6 @@ function useActiveCard(effect, btn) {
     case "magnet2":
       magnet2Mode = {r:0,c:0};
       alert("Mine Magnetism II: click a tile to pull mines toward it.");
-      magnet2Mode = null;
       break;
     case "fateFlip":
       fateFlip();
@@ -1207,7 +1191,45 @@ function updateAfterMineChange() {
   }
 }
 
-newGame();
+/* Prestige: full clear → bigger board + double mines */
+
+function checkWinAndPrestige() {
+  if (gameOver) return;
+
+  let allGood = true;
+  for (let r=0; r<ROWS && allGood; r++) {
+    for (let c=0; c<COLS; c++) {
+      const cell = board[r][c];
+      if (!cell.mine && !cell.revealed) {
+        allGood = false;
+        break;
+      }
+      if (cell.mine && !cell.flagged) {
+        allGood = false;
+        break;
+      }
+      if (!cell.mine && cell.flagged) {
+        allGood = false;
+        break;
+      }
+    }
+  }
+
+  if (!allGood) return;
+
+  cycle++;
+  ROWS += 4;
+  COLS += 4;
+  totalMines = totalMines * 2;
+
+  alert("Board cleared! New cycle: " + cycle +
+        "\nBoard size: " + ROWS + "×" + COLS +
+        "\nMines doubled to: " + totalMines);
+
+  newGame(false);
+}
+
+newGame(true);
 </script>
 </body>
 </html>
