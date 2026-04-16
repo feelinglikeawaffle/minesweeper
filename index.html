@@ -1197,37 +1197,53 @@ function checkWinAndPrestige() {
   if (gameOver) return;
 
   let allGood = true;
-  for (let r=0; r<ROWS && allGood; r++) {
-    for (let c=0; c<COLS; c++) {
+
+  for (let r = 0; r < ROWS && allGood; r++) {
+    for (let c = 0; c < COLS; c++) {
       const cell = board[r][c];
-      if (!cell.mine && !cell.revealed) {
-        allGood = false;
-        break;
+
+      // SAFE TILE CONDITIONS
+      if (!cell.mine) {
+        // Must be revealed OR claimedSafe
+        if (!cell.revealed && !cell.el.classList.contains("claimedSafe")) {
+          allGood = false;
+          break;
+        }
+        // Must NOT be flagged
+        if (cell.flagged) {
+          allGood = false;
+          break;
+        }
       }
-      if (cell.mine && !cell.flagged) {
-        allGood = false;
-        break;
-      }
-      if (!cell.mine && cell.flagged) {
-        allGood = false;
-        break;
+
+      // MINE TILE CONDITIONS
+      else {
+        // Must be flagged OR claimedMine
+        if (!cell.flagged && !cell.el.classList.contains("claimedMine")) {
+          allGood = false;
+          break;
+        }
       }
     }
   }
 
   if (!allGood) return;
 
+  // PRESTIGE TRIGGER
   cycle++;
   ROWS += 4;
   COLS += 4;
   totalMines = totalMines * 2;
 
-  alert("Board cleared! New cycle: " + cycle +
-        "\nBoard size: " + ROWS + "×" + COLS +
-        "\nMines doubled to: " + totalMines);
+  alert(
+    "Board cleared! New cycle: " + cycle +
+    "\nBoard size: " + ROWS + "×" + COLS +
+    "\nMines doubled to: " + totalMines
+  );
 
   newGame(false);
 }
+
 
 newGame(true);
 </script>
