@@ -2,7 +2,7 @@
 <html>
 <head>
 <meta charset="UTF-8">
-<title>Decksweeper</title>
+<title>Decksweeper A.1.93</title>
 <style>
   body {
     background:#1b1b1b;
@@ -36,11 +36,23 @@
     cursor:pointer;
     border-radius:3px;
     font-size:14px;
-    transition:box-shadow 0.2s;
+    transition:box-shadow 0.2s, background 0.2s, transform 0.1s;
   }
   .revealed { background:#777; cursor:default; }
   .mine.revealed { background:#b00; }
   .flagged { background:#224; color:#ff0; }
+
+  /* claimed states after mine shuffles */
+  .claimedMine {
+    background:#224 !important;
+    color:#ffeb3b !important;
+    box-shadow:0 0 6px rgba(34,68,136,0.6);
+  }
+  .claimedSafe {
+    background:#6b8cff !important;
+    color:#fff !important;
+    box-shadow:0 0 6px rgba(107,140,255,0.35);
+  }
 
   #activeBar {
     margin-top:15px;
@@ -87,30 +99,32 @@
   .epic { border-left:4px solid gold; }
   .fools { border-left:4px solid #ff4081; }
 
+  /* X-ray glow */
   .glowMine {
     animation: glowMineAnim 1.5s ease-out;
   }
   @keyframes glowMineAnim {
-    0% { box-shadow: 0 0 0px rgba(255,0,0,0); }
-    50% { box-shadow: 0 0 12px rgba(255,0,0,0.8); }
-    100% { box-shadow: 0 0 0px rgba(255,0,0,0); }
+    0% { box-shadow:0 0 0px rgba(255,0,0,0); }
+    50% { box-shadow:0 0 12px rgba(255,0,0,0.8); }
+    100% { box-shadow:0 0 0px rgba(255,0,0,0); }
   }
 
+  /* wrong flag shake */
   .wrongFlag {
     animation: wrongFlagAnim 0.5s;
   }
   @keyframes wrongFlagAnim {
-    0% { transform: translateX(0px); }
-    25% { transform: translateX(-3px); }
-    50% { transform: translateX(3px); }
-    75% { transform: translateX(-3px); }
-    100% { transform: translateX(0px); }
+    0% { transform:translateX(0px); }
+    25% { transform:translateX(-3px); }
+    50% { transform:translateX(3px); }
+    75% { transform:translateX(-3px); }
+    100% { transform:translateX(0px); }
   }
 </style>
 </head>
 <body>
 
-<h1>Decksweeper</h1>
+<h1>Decksweeper A.1.93</h1>
 <div id="topBar">
   <div>Coins: <span id="coins">0</span></div>
   <button onclick="newGame()">New Game</button>
@@ -132,11 +146,12 @@
 <script>
 const ROWS = 20;
 const COLS = 20;
-const MINES = 50;
+const MINES_BASE = 50;
 
 let board = [];
 let coins = 0;
 let gameOver = false;
+let totalMines = MINES_BASE;
 
 let passives = {
   coinMagnet: 0,
@@ -149,7 +164,11 @@ let passives = {
   cornerBonus: false,
   flagBonus: false,
   zeroBonus: false,
-  goldenPick: false
+  goldenPick: false,
+  mercyCull: false,
+  mineTax: false,
+  guardianAngel: false,
+  entropySurge: false
 };
 
 let activeCards = [];
@@ -158,71 +177,115 @@ let probeMode = false;
 let excavatorMode = false;
 let vacuumMode = false;
 let scanMode = false;
+let magnet2Mode = null; // target tile for Mine Magnetism II
 let xrayTurns = 0;
 
 const CARD_POOL = [
-  {name:"Double Dig", rarity:"common", cost:8, effect:"doubleNext",
+  // Economy / logic
+  {name:"Double Dig", rarity:"common", type:"economy", cost:8, effect:"doubleNext",
    desc:"Next revealed tile gives double coins."},
-  {name:"Miner’s Touch", rarity:"common", cost:10, effect:"adjBonus",
+  {name:"Miner’s Touch", rarity:"common", type:"economy", cost:10, effect:"adjBonus",
    desc:"Next reveal gains +1 coin per adjacent number."},
-  {name:"Treasure Map", rarity:"rare", cost:20, effect:"cornerBonus",
+  {name:"Treasure Map", rarity:"rare", type:"economy", cost:20, effect:"cornerBonus",
    desc:"Next corner tile you reveal gives +10 coins."},
-  {name:"Lucky Flag", rarity:"common", cost:12, effect:"flagBonus",
+  {name:"Lucky Flag", rarity:"common", type:"economy", cost:12, effect:"flagBonus",
    desc:"Next correct flag gives +5 coins."},
-  {name:"Golden Chain", rarity:"rare", cost:25, effect:"zeroBonus",
+  {name:"Golden Chain", rarity:"rare", type:"economy", cost:25, effect:"zeroBonus",
    desc:"Next zero-region clear gives +10 extra coins."},
 
-  {name:"Excavator", rarity:"rare", cost:20, effect:"excavator",
+  // Board manipulation / utility
+  {name:"Excavator", rarity:"rare", type:"utility", cost:20, effect:"excavator",
    desc:"Next click reveals a 3×3 area around it."},
-  {name:"Brushfire", rarity:"common", cost:10, effect:"brushfire",
+  {name:"Brushfire", rarity:"common", type:"utility", cost:10, effect:"brushfire",
    desc:"Next zero reveal aggressively spreads to nearby zeros."},
-  {name:"Probe", rarity:"common", cost:8, effect:"probe",
+  {name:"Probe", rarity:"common", type:"logic", cost:8, effect:"probe",
    desc:"Click a tile to see if it’s a mine without triggering it."},
-  {name:"Swap", rarity:"fools", cost:18, effect:"swap",
-   desc:"Swap mine status of two unrevealed tiles. Could help or hurt."},
-  {name:"Earthquake", rarity:"fools", cost:40, effect:"earthquake",
-   desc:"Shuffle all mines, recalc numbers, and fix revealed tiles/flags."},
-
-  {name:"Defuser", rarity:"rare", cost:25, effect:"defuse",
-   desc:"Remove one random mine from the board."},
-  {name:"Scanner", rarity:"common", cost:10, effect:"scan",
+  {name:"Scanner", rarity:"common", type:"logic", cost:10, effect:"scan",
    desc:"Click a tile to see how many mines are in a 5×5 area."},
-  {name:"Magnet", rarity:"fools", cost:45, effect:"magnet",
-   desc:"Pull mines one step toward center. Can make things worse."},
-  {name:"Ghost Flag", rarity:"common", cost:10, effect:"ghostFlag",
-   desc:"Place temporary flags with no penalty (visual only)."},
-  {name:"Bomb Insurance", rarity:"rare", cost:20, effect:"insurance",
-   desc:"Survive the next explosion."},
+  {name:"Flag Checker", rarity:"rare", type:"logic", cost:18, effect:"flagCheck",
+   desc:"Checks all flags. Correct flags glow green, wrong flags shake red."},
+  {name:"Flag Amnesty", rarity:"rare", type:"utility", cost:22, effect:"flagAmnesty",
+   desc:"Remove all flags. Gain 5 coins for each correct flag."},
 
-  {name:"Time Stop", rarity:"epic", cost:50, effect:"timeStop",
-   desc:"Reveal 5 tiles for free without triggering mines."},
-  {name:"X-Ray Vision", rarity:"epic", cost:60, effect:"xray",
-   desc:"Nearby mines may glow softly for the next 3 turns."},
-  {name:"Terraform", rarity:"fools", cost:55, effect:"terraform",
+  // Mine control / power
+  {name:"Defuser", rarity:"rare", type:"power", cost:25, effect:"defuse",
+   desc:"Remove one random mine from the board."},
+  {name:"Terraform", rarity:"fools", type:"chaos", cost:55, effect:"terraform",
    desc:"Turn 10 random tiles safe. Could move danger closer."},
-  {name:"Mine Vacuum", rarity:"fools", cost:60, effect:"vacuum",
+  {name:"Mine Vacuum", rarity:"fools", type:"chaos", cost:60, effect:"vacuum",
    desc:"Remove all mines in a straight line from a chosen tile."},
-  {name:"Golden Pickaxe", rarity:"epic", cost:70, effect:"goldenPick",
+  {name:"Swap", rarity:"fools", type:"chaos", cost:18, effect:"swap",
+   desc:"Swap mine status of two unrevealed tiles. Could help or hurt."},
+  {name:"Magnet", rarity:"fools", type:"chaos", cost:45, effect:"magnet",
+   desc:"Pull mines one step toward center. Can make things worse."},
+  {name:"Mine Magnetism II", rarity:"epic", type:"power", cost:55, effect:"magnet2",
+   desc:"Click a tile to pull all mines one step toward it."},
+  {name:"Mutation Pulse", rarity:"epic", type:"chaos", cost:50, effect:"mutationPulse",
+   desc:"10 safe tiles become mines and 10 mines become safe."},
+  {name:"Boomerang Bombs", rarity:"fools", type:"chaos", cost:35, effect:"boomerangBombs",
+   desc:"All mines shift one tile in a random direction."},
+
+  // Power cards
+  {name:"Time Stop", rarity:"epic", type:"power", cost:50, effect:"timeStop",
+   desc:"Reveal 5 tiles for free without triggering mines."},
+  {name:"X-Ray Vision", rarity:"epic", type:"power", cost:60, effect:"xray",
+   desc:"Nearby mines may glow softly for the next 3 turns."},
+  {name:"Golden Pickaxe", rarity:"epic", type:"economy", cost:70, effect:"goldenPick",
    desc:"All reveals this turn give 5× coins."},
 
-  {name:"Coin Magnet", rarity:"rare", cost:25, effect:"passive_coin",
+  // Passives
+  {name:"Coin Magnet", rarity:"rare", type:"economy", cost:25, effect:"passive_coin",
    desc:"Permanently gain +1 coin per revealed tile."},
-  {name:"Thick Gloves", rarity:"rare", cost:30, effect:"passive_gloves",
+  {name:"Thick Gloves", rarity:"rare", type:"defense", cost:30, effect:"passive_gloves",
    desc:"First misclick each game is ignored."},
-  {name:"Reinforced Boots", rarity:"rare", cost:30, effect:"passive_boots",
+  {name:"Reinforced Boots", rarity:"rare", type:"defense", cost:30, effect:"passive_boots",
    desc:"You can step on one mine without dying."},
+  {name:"Bomb Insurance", rarity:"rare", type:"defense", cost:20, effect:"insurance",
+   desc:"Survive the next explosion."},
+  {name:"Guardian Angel", rarity:"rare", type:"defense", cost:35, effect:"guardianAngel",
+   desc:"Prevent death once, then add 10 mines and clear a 3×3 safe zone."},
+  {name:"Mine Tax", rarity:"fools", type:"chaos", cost:20, effect:"mineTax",
+   desc:"Buying cards spawns 5% more mines, but reveals give +2 coins."},
+  {name:"Entropy Surge", rarity:"fools", type:"chaos", cost:40, effect:"entropySurge",
+   desc:"Each turn, 1 safe tile becomes a mine and 1 mine becomes safe."},
 
-  {name:"Flag Checker", rarity:"rare", cost:18, effect:"flagCheck",
-   desc:"Checks all flags. Correct flags glow green, wrong flags shake red."},
-
-  {name:"1UP", rarity:"fools", cost:35, effect:"oneUp",
+  // High-risk fools / chaos
+  {name:"Earthquake", rarity:"fools", type:"chaos", cost:40, effect:"earthquake",
+   desc:"Shuffle all mines, recalc numbers, and fix revealed tiles/flags."},
+  {name:"Fate Flip", rarity:"fools", type:"chaos", cost:45, effect:"fateFlip",
+   desc:"50% remove 30% mines, 50% add 30% more mines."},
+  {name:"Judgment Flags", rarity:"fools", type:"chaos", cost:30, effect:"judgmentFlags",
+   desc:"Checks all flags; each wrong one spawns 10% more mines and becomes claimed safe."},
+  {name:"Mercy Cull", rarity:"rare", type:"defense", cost:35, effect:"mercyCull",
+   desc:"Remove 20% of mines, but any wrong flag kills you instantly."},
+  {name:"1UP", rarity:"fools", type:"chaos", cost:35, effect:"oneUp",
    desc:"Gain +1 life. When used, 25% more mines spawn and board recalculates."}
 ];
+
+function rarityWeight(r) {
+  if (r === "common") return 5;
+  if (r === "rare") return 3;
+  if (r === "epic") return 1;
+  if (r === "fools") return 1;
+  return 1;
+}
+
+function getRandomCard() {
+  let total = 0;
+  CARD_POOL.forEach(c => total += rarityWeight(c.rarity));
+  let roll = Math.random() * total;
+  for (let card of CARD_POOL) {
+    roll -= rarityWeight(card.rarity);
+    if (roll <= 0) return card;
+  }
+  return CARD_POOL[CARD_POOL.length - 1];
+}
 
 function newGame() {
   board = [];
   coins = 0;
   gameOver = false;
+  totalMines = MINES_BASE;
   passives = {
     coinMagnet: 0,
     thickGloves: false,
@@ -234,13 +297,18 @@ function newGame() {
     cornerBonus: false,
     flagBonus: false,
     zeroBonus: false,
-    goldenPick: false
+    goldenPick: false,
+    mercyCull: false,
+    mineTax: false,
+    guardianAngel: false,
+    entropySurge: false
   };
   activeCards = [];
   probeMode = false;
   excavatorMode = false;
   vacuumMode = false;
   scanMode = false;
+  magnet2Mode = null;
   xrayTurns = 0;
 
   document.getElementById("coins").textContent = coins;
@@ -263,7 +331,7 @@ function newGame() {
   }
 
   let placed = 0;
-  while (placed < MINES) {
+  while (placed < totalMines) {
     let r = Math.floor(Math.random()*ROWS);
     let c = Math.floor(Math.random()*COLS);
     if (!board[r][c].mine) {
@@ -344,11 +412,18 @@ function clickCell(r,c) {
     for (let cc=0; cc<COLS; cc++) {
       board[r][cc].mine = false;
     }
-    computeAdjacents();
+    totalMines = countMines();
     updateAfterMineChange();
     alert("Mine Vacuum cleared a row.");
     vacuumMode = false;
-    if (!gameOver) openShop();
+    if (!gameOver) endTurn();
+    return;
+  }
+
+  if (magnet2Mode) {
+    applyMineMagnetism2(magnet2Mode.r, magnet2Mode.c);
+    magnet2Mode = null;
+    if (!gameOver) endTurn();
     return;
   }
 
@@ -356,7 +431,7 @@ function clickCell(r,c) {
     for (let dr=-1; dr<=1; dr++) {
       for (let dc=-1; dc<=1; dc++) {
         let nr=r+dr, nc=c+dc;
-        if (nr>=0 && nr<ROWS && nc>=0 && nc<COLS) {
+        if (nr>=0 && nr<COLS && nc>=0 && nc<COLS) {
           reveal(nr,nc);
         }
       }
@@ -371,7 +446,14 @@ function clickCell(r,c) {
     xrayTurns--;
   }
 
-  if (!gameOver) openShop();
+  if (!gameOver) endTurn();
+}
+
+function endTurn() {
+  if (passives.entropySurge) {
+    entropyStep();
+  }
+  openShop();
 }
 
 function reveal(r,c) {
@@ -394,6 +476,9 @@ function reveal(r,c) {
   if (passives.goldenPick) {
     gain *= 5;
   }
+  if (passives.mineTax) {
+    gain += 2;
+  }
   coins += gain;
   document.getElementById("coins").textContent = coins;
 
@@ -401,13 +486,19 @@ function reveal(r,c) {
     if (passives.extraLife) {
       passives.extraLife = false;
       alert("1UP saved you! But more mines have spawned...");
-      let extra = Math.floor(MINES * 0.25);
-      for (let i=0; i<extra; i++) {
-        let rr = Math.floor(Math.random()*ROWS);
-        let cc = Math.floor(Math.random()*COLS);
-        board[rr][cc].mine = true;
-      }
-      computeAdjacents();
+      let extra = Math.floor(totalMines * 0.25);
+      spawnRandomMines(extra);
+      totalMines = countMines();
+      updateAfterMineChange();
+      return;
+    }
+
+    if (passives.guardianAngel) {
+      passives.guardianAngel = false;
+      alert("Guardian Angel saved you! Clearing a 3×3 safe zone and adding 10 mines.");
+      clearSafeZone(r,c);
+      spawnRandomMines(10);
+      totalMines = countMines();
       updateAfterMineChange();
       return;
     }
@@ -435,26 +526,29 @@ function reveal(r,c) {
 
   if (cell.adj > 0) {
     cell.el.textContent = cell.adj;
-    return;
-  }
-
-  let zeroTriggered = false;
-  if (cell.adj === 0) zeroTriggered = true;
-
-  for (let dr=-1; dr<=1; dr++) {
-    for (let dc=-1; dc<=1; dc++) {
-      if (dr===0 && dc===0) continue;
-      let nr=r+dr, nc=c+dc;
-      if (nr>=0 && nr<ROWS && nc>=0 && nc<COLS && !board[nr][nc].mine) {
-        if (!board[nr][nc].revealed) reveal(nr,nc);
+  } else {
+    let zeroTriggered = true;
+    for (let dr=-1; dr<=1; dr++) {
+      for (let dc=-1; dc<=1; dc++) {
+        if (dr===0 && dc===0) continue;
+        let nr=r+dr, nc=c+dc;
+        if (nr>=0 && nr<ROWS && nc>=0 && nc<COLS && !board[nr][nc].mine) {
+          if (!board[nr][nc].revealed) reveal(nr,nc);
+        }
       }
+    }
+    if (zeroTriggered && passives.zeroBonus) {
+      coins += 10;
+      document.getElementById("coins").textContent = coins;
+      passives.zeroBonus = false;
     }
   }
 
-  if (zeroTriggered && passives.zeroBonus) {
+  if (passives.cornerBonus &&
+      ((r===0 || r===ROWS-1) && (c===0 || c===COLS-1))) {
     coins += 10;
     document.getElementById("coins").textContent = coins;
-    passives.zeroBonus = false;
+    passives.cornerBonus = false;
   }
 }
 
@@ -470,6 +564,12 @@ function flagCell(r,c) {
     coins += 5;
     document.getElementById("coins").textContent = coins;
     passives.flagBonus = false;
+  }
+
+  if (passives.mercyCull && cell.flagged && !cell.mine) {
+    alert("Mercy Cull: wrong flag! Instant death.");
+    gameOver = true;
+    revealAllMines();
   }
 }
 
@@ -524,7 +624,7 @@ function openShop() {
 
   let options = [];
   for (let i=0; i<3; i++) {
-    options.push(CARD_POOL[Math.floor(Math.random()*CARD_POOL.length)]);
+    options.push(getRandomCard());
   }
 
   options.forEach(card => {
@@ -555,12 +655,21 @@ function buyCard(card) {
   }
   coins -= card.cost;
   document.getElementById("coins").textContent = coins;
+
+  if (passives.mineTax) {
+    let extra = Math.floor(totalMines * 0.05);
+    spawnRandomMines(extra);
+    totalMines = countMines();
+    updateAfterMineChange();
+  }
+
   applyCard(card);
   closeShop();
 }
 
 function applyCard(card) {
   switch(card.effect) {
+    // passives
     case "passive_coin":
       passives.coinMagnet++;
       alert("Coin Magnet: +" + passives.coinMagnet + " coin per tile.");
@@ -573,7 +682,14 @@ function applyCard(card) {
       passives.safeStep = true;
       alert("Reinforced Boots: one free mine step.");
       break;
-
+    case "insurance":
+      passives.insurance = true;
+      alert("Bomb Insurance: survive the next explosion.");
+      break;
+    case "goldenPick":
+      passives.goldenPick = true;
+      alert("Golden Pickaxe: all reveals this turn give ×5 coins.");
+      break;
     case "doubleNext":
       passives.doubleNext = true;
       alert("Double Dig: next reveal gives double coins.");
@@ -594,33 +710,43 @@ function applyCard(card) {
       passives.zeroBonus = true;
       alert("Golden Chain: next zero-region gives +10 coins.");
       break;
-    case "insurance":
-      passives.insurance = true;
-      alert("Bomb Insurance: survive the next explosion.");
-      break;
-    case "goldenPick":
-      passives.goldenPick = true;
-      alert("Golden Pickaxe: all reveals this turn give ×5 coins.");
-      break;
-
     case "oneUp":
       passives.extraLife = true;
       alert("1UP acquired: you have an extra life!");
       break;
+    case "mercyCull":
+      mercyCullEffect();
+      break;
+    case "mineTax":
+      passives.mineTax = true;
+      alert("Mine Tax: +2 coins per reveal, but buying cards spawns more mines.");
+      break;
+    case "guardianAngel":
+      passives.guardianAngel = true;
+      alert("Guardian Angel: prevents death once, then adds 10 mines.");
+      break;
+    case "entropySurge":
+      passives.entropySurge = true;
+      alert("Entropy Surge: each turn, 1 safe tile becomes a mine and 1 mine becomes safe.");
+      break;
 
+    // modes / actives
     case "probe":
     case "excavator":
     case "scan":
     case "vacuum":
     case "flagCheck":
-      addActiveCard(card);
-      break;
-
+    case "flagAmnesty":
     case "defuse":
     case "terraform":
     case "earthquake":
     case "magnet":
     case "swap":
+    case "mutationPulse":
+    case "boomerangBombs":
+    case "magnet2":
+    case "fateFlip":
+    case "judgmentFlags":
       addActiveCard(card);
       break;
 
@@ -665,7 +791,9 @@ function useActiveCard(effect, btn) {
     case "flagCheck":
       flagCheck();
       break;
-
+    case "flagAmnesty":
+      flagAmnestyEffect();
+      break;
     case "defuse":
       removeRandomMine();
       break;
@@ -681,12 +809,53 @@ function useActiveCard(effect, btn) {
     case "swap":
       swapTwoTiles();
       break;
-
+    case "mutationPulse":
+      mutationPulse();
+      break;
+    case "boomerangBombs":
+      boomerangBombs();
+      break;
+    case "magnet2":
+      magnet2Mode = {r:0,c:0};
+      alert("Mine Magnetism II: click a tile to pull mines toward it.");
+      magnet2Mode = null;
+      break;
+    case "fateFlip":
+      fateFlip();
+      break;
+    case "judgmentFlags":
+      judgmentFlagsEffect();
+      break;
     default:
       alert("Used card: " + effect + " (placeholder effect).");
   }
   btn.remove();
   activeCards = activeCards.filter(c => c.effect !== effect);
+}
+
+/* Mine-changing helpers */
+
+function countMines() {
+  let n = 0;
+  for (let r=0; r<ROWS; r++)
+    for (let c=0; c<COLS; c++)
+      if (board[r][c].mine) n++;
+  return n;
+}
+
+function spawnRandomMines(n) {
+  let tries = 0;
+  while (n > 0 && tries < 10000) {
+    let r = Math.floor(Math.random()*ROWS);
+    let c = Math.floor(Math.random()*COLS);
+    if (!board[r][c].mine) {
+      board[r][c].mine = true;
+      n--;
+    }
+    tries++;
+  }
+  computeAdjacents();
+  updateAfterMineChange();
 }
 
 function removeRandomMine() {
@@ -703,6 +872,7 @@ function removeRandomMine() {
 
   let m = mines[Math.floor(Math.random()*mines.length)];
   m.mine = false;
+  totalMines = countMines();
   computeAdjacents();
   updateAfterMineChange();
   alert("Defuser removed a random mine.");
@@ -718,6 +888,7 @@ function terraform() {
       changed++;
     }
   }
+  totalMines = countMines();
   computeAdjacents();
   updateAfterMineChange();
   alert("Terraform changed " + changed + " tiles to safe.");
@@ -736,6 +907,7 @@ function earthquake() {
     for (let c=0; c<COLS; c++)
       board[r][c].mine = mines[i++];
 
+  totalMines = countMines();
   computeAdjacents();
   updateAfterMineChange();
   alert("Earthquake reshuffled the mines.");
@@ -764,9 +936,35 @@ function magnet() {
     for (let c=0; c<COLS; c++)
       board[r][c].mine = newMines[r][c];
 
+  totalMines = countMines();
   computeAdjacents();
   updateAfterMineChange();
   alert("Magnet pulled mines toward the center.");
+}
+
+function applyMineMagnetism2(tr,tc) {
+  let newMines = Array.from({length:ROWS}, () => Array(COLS).fill(false));
+  for (let r=0; r<ROWS; r++) {
+    for (let c=0; c<COLS; c++) {
+      if (!board[r][c].mine) continue;
+      let dr = tr > r ? 1 : (tr < r ? -1 : 0);
+      let dc = tc > c ? 1 : (tc < c ? -1 : 0);
+      let nr = r + dr;
+      let nc = c + dc;
+      if (nr<0 || nr>=ROWS || nc<0 || nc>=COLS) {
+        nr = r; nc = c;
+      }
+      newMines[nr][nc] = true;
+    }
+  }
+  for (let r=0; r<ROWS; r++)
+    for (let c=0; c<COLS; c++)
+      board[r][c].mine = newMines[r][c];
+
+  totalMines = countMines();
+  computeAdjacents();
+  updateAfterMineChange();
+  alert("Mine Magnetism II pulled mines toward your chosen tile.");
 }
 
 function swapTwoTiles() {
@@ -789,54 +987,227 @@ function swapTwoTiles() {
   a.mine = true;
   b.mine = false;
 
+  totalMines = countMines();
   computeAdjacents();
   updateAfterMineChange();
   alert("Swap exchanged a safe tile with a mine.");
 }
 
+function mutationPulse() {
+  let safeTiles = [];
+  let mineTiles = [];
+  for (let r=0; r<ROWS; r++) {
+    for (let c=0; c<COLS; c++) {
+      const cell = board[r][c];
+      if (cell.mine) mineTiles.push(cell);
+      else safeTiles.push(cell);
+    }
+  }
+  for (let i=0; i<10 && safeTiles.length>0; i++) {
+    let idx = Math.floor(Math.random()*safeTiles.length);
+    safeTiles[idx].mine = true;
+    safeTiles.splice(idx,1);
+  }
+  for (let i=0; i<10 && mineTiles.length>0; i++) {
+    let idx = Math.floor(Math.random()*mineTiles.length);
+    mineTiles[idx].mine = false;
+    mineTiles.splice(idx,1);
+  }
+  totalMines = countMines();
+  computeAdjacents();
+  updateAfterMineChange();
+  alert("Mutation Pulse shuffled mines and safe tiles.");
+}
+
+function boomerangBombs() {
+  const dirs = [
+    {dr:-1,dc:0},{dr:1,dc:0},{dr:0,dc:-1},{dr:0,dc:1}
+  ];
+  const d = dirs[Math.floor(Math.random()*dirs.length)];
+  let newMines = Array.from({length:ROWS}, () => Array(COLS).fill(false));
+  for (let r=0; r<ROWS; r++) {
+    for (let c=0; c<COLS; c++) {
+      if (!board[r][c].mine) continue;
+      let nr = r + d.dr;
+      let nc = c + d.dc;
+      if (nr<0 || nr>=ROWS || nc<0 || nc>=COLS) {
+        nr = r; nc = c;
+      }
+      newMines[nr][nc] = true;
+    }
+  }
+  for (let r=0; r<ROWS; r++)
+    for (let c=0; c<COLS; c++)
+      board[r][c].mine = newMines[r][c];
+
+  totalMines = countMines();
+  computeAdjacents();
+  updateAfterMineChange();
+  alert("Boomerang Bombs shifted all mines.");
+}
+
+function fateFlip() {
+  if (Math.random() < 0.5) {
+    let toRemove = Math.floor(totalMines * 0.3);
+    let mines = [];
+    for (let r=0; r<ROWS; r++)
+      for (let c=0; c<COLS; c++)
+        if (board[r][c].mine) mines.push(board[r][c]);
+    while (toRemove > 0 && mines.length > 0) {
+      let idx = Math.floor(Math.random()*mines.length);
+      mines[idx].mine = false;
+      mines.splice(idx,1);
+      toRemove--;
+    }
+    alert("Fate Flip: removed 30% of mines!");
+  } else {
+    let extra = Math.floor(totalMines * 0.3);
+    spawnRandomMines(extra);
+    alert("Fate Flip: added 30% more mines!");
+  }
+  totalMines = countMines();
+  computeAdjacents();
+  updateAfterMineChange();
+}
+
+function judgmentFlagsEffect() {
+  let wrongCount = 0;
+  for (let r=0; r<ROWS; r++) {
+    for (let c=0; c<COLS; c++) {
+      const cell = board[r][c];
+      if (!cell.flagged) continue;
+      if (!cell.mine) wrongCount++;
+    }
+  }
+  if (wrongCount === 0) {
+    alert("Judgment Flags: all your flags are correct!");
+  } else {
+    let extra = Math.floor(totalMines * 0.1 * wrongCount);
+    spawnRandomMines(extra);
+    totalMines = countMines();
+    alert("Judgment Flags: " + wrongCount + " wrong flags spawned more mines.");
+  }
+  computeAdjacents();
+  updateAfterMineChange();
+}
+
+function mercyCullEffect() {
+  let toRemove = Math.floor(totalMines * 0.2);
+  let mines = [];
+  for (let r=0; r<ROWS; r++)
+    for (let c=0; c<COLS; c++)
+      if (board[r][c].mine) mines.push(board[r][c]);
+  while (toRemove > 0 && mines.length > 0) {
+    let idx = Math.floor(Math.random()*mines.length);
+    mines[idx].mine = false;
+    mines.splice(idx,1);
+    toRemove--;
+  }
+  totalMines = countMines();
+  passives.mercyCull = true;
+  computeAdjacents();
+  updateAfterMineChange();
+  alert("Mercy Cull removed 20% of mines. But now, any wrong flag kills you.");
+}
+
+function flagAmnestyEffect() {
+  let correct = 0;
+  for (let r=0; r<ROWS; r++) {
+    for (let c=0; c<COLS; c++) {
+      const cell = board[r][c];
+      if (!cell.flagged) continue;
+      if (cell.mine) correct++;
+      cell.flagged = false;
+      cell.el.classList.remove("flagged");
+      cell.revealed = true;
+      cell.el.classList.add("revealed");
+      cell.el.textContent = cell.adj > 0 ? cell.adj : "";
+    }
+  }
+  if (correct > 0) {
+    coins += correct * 5;
+    document.getElementById("coins").textContent = coins;
+  }
+  alert("Flag Amnesty: removed all flags. Correct flags: " + correct);
+}
+
+function clearSafeZone(r,c) {
+  for (let dr=-1; dr<=1; dr++) {
+    for (let dc=-1; dc<=1; dc++) {
+      let nr = r+dr, nc = c+dc;
+      if (nr<0 || nr>=ROWS || nc<0 || nc>=COLS) continue;
+      board[nr][nc].mine = false;
+      reveal(nr,nc);
+    }
+  }
+}
+
+function entropyStep() {
+  let safeTiles = [];
+  let mineTiles = [];
+  for (let r=0; r<ROWS; r++) {
+    for (let c=0; c<COLS; c++) {
+      const cell = board[r][c];
+      if (cell.mine) mineTiles.push(cell);
+      else safeTiles.push(cell);
+    }
+  }
+  if (safeTiles.length > 0) {
+    let s = safeTiles[Math.floor(Math.random()*safeTiles.length)];
+    s.mine = true;
+  }
+  if (mineTiles.length > 0) {
+    let m = mineTiles[Math.floor(Math.random()*mineTiles.length)];
+    m.mine = false;
+  }
+  totalMines = countMines();
+  computeAdjacents();
+  updateAfterMineChange();
+}
+
 function updateAfterMineChange() {
+  computeAdjacents();
   for (let r = 0; r < ROWS; r++) {
     for (let c = 0; c < COLS; c++) {
       const cell = board[r][c];
       if (!cell.el) continue;
 
-      // CASE 1: Tile was revealed BEFORE shuffle
+      cell.el.classList.remove("claimedMine", "claimedSafe");
+
       if (cell.revealed) {
-
         if (cell.mine) {
-          // A revealed tile now contains a mine → auto-blue-flag
-          cell.flagged = true;
-          cell.el.classList.add("flagged");
-          cell.el.classList.add("mine");
-          cell.el.style.background = "#224";   // blue-ish
-          cell.el.textContent = "";            // no number
-        } else {
-          // A revealed tile is safe → update number
           cell.flagged = false;
+          cell.el.classList.add("claimedMine");
           cell.el.classList.remove("flagged","mine");
-          cell.el.style.background = "#777";   // revealed color
+          cell.el.textContent = "";
+        } else {
+          cell.flagged = false;
+          cell.el.classList.remove("flagged","mine","claimedMine","claimedSafe");
+          cell.el.classList.add("revealed");
           cell.el.textContent = cell.adj > 0 ? cell.adj : "";
+          cell.el.style.background = "";
         }
-      }
-
-      // CASE 2: Tile was flagged BEFORE shuffle
-      else if (cell.flagged && !cell.revealed) {
-
-        if (!cell.mine) {
-          // Flag was wrong AFTER shuffle → remove it
+      } else if (cell.flagged && !cell.revealed) {
+        if (cell.mine) {
+          cell.el.classList.remove("claimedSafe","claimedMine");
+        } else {
           cell.flagged = false;
           cell.el.classList.remove("flagged");
+          cell.revealed = true;
+          cell.el.classList.add("claimedSafe");
+          cell.el.textContent = cell.adj > 0 ? cell.adj : "";
+        }
+      } else {
+        if (!cell.revealed && !cell.flagged) {
+          cell.el.classList.remove("revealed","flagged","mine","claimedMine","claimedSafe");
           cell.el.textContent = "";
         }
-        // If it IS a mine now, keep the flag (correct)
       }
     }
   }
 }
 
-
 newGame();
 </script>
 </body>
 </html>
-// hi
